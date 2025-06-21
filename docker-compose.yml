@@ -1,0 +1,387 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # CORE INFRASTRUCTURE
+  # =============================================================================
+  
+  # PostgreSQL - Primary Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: aiops-postgres
+    environment:
+      POSTGRES_DB: aiops_platform
+      POSTGRES_USER: aiops_user
+      POSTGRES_PASSWORD: aiops_password
+      POSTGRES_MULTIPLE_DATABASES: incidents,compliance,users,config
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/database/init:/docker-entrypoint-initdb.d
+    networks:
+      - aiops-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiops_user -d aiops_platform"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis - Caching and Session Store
+  redis:
+    image: redis:7-alpine
+    container_name: aiops-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - aiops-network
+    command: redis-server --appendonly yes --requirepass aiops_redis_password
+
+  # ClickHouse - Time Series Analytics
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: aiops-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./config/clickhouse:/etc/clickhouse-server/config.d
+    networks:
+      - aiops-network
+    environment:
+      CLICKHOUSE_DB: aiops_metrics
+      CLICKHOUSE_USER: aiops_user
+      CLICKHOUSE_PASSWORD: aiops_password
+
+  # =============================================================================
+  # MESSAGE QUEUE & STREAMING
+  # =============================================================================
+
+  # Zookeeper for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: aiops-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - aiops-network
+
+  # Apache Kafka - Event Streaming
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: aiops-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    networks:
+      - aiops-network
+
+  # =============================================================================
+  # SEARCH & ANALYTICS
+  # =============================================================================
+
+  # Elasticsearch - Log Analytics
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: aiops-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - aiops-network
+
+  # Kibana - Elasticsearch UI
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: aiops-kibana
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    networks:
+      - aiops-network
+
+  # =============================================================================
+  # MONITORING & OBSERVABILITY
+  # =============================================================================
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: aiops-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    networks:
+      - aiops-network
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: aiops-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - aiops-network
+
+  # Jaeger - Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.47
+    container_name: aiops-jaeger
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - aiops-network
+
+  # =============================================================================
+  # AI/ML SERVICES
+  # =============================================================================
+
+  # MLflow - ML Model Management
+  mlflow:
+    image: mlflow/mlflow:2.5.0
+    container_name: aiops-mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=postgresql://aiops_user:aiops_password@postgres:5432/aiops_platform
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=s3://aiops-mlflow-artifacts
+    depends_on:
+      - postgres
+    networks:
+      - aiops-network
+    command: mlflow server --host 0.0.0.0 --port 5000
+
+  # =============================================================================
+  # CORE PLATFORM SERVICES
+  # =============================================================================
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: aiops-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://aiops_user:aiops_password@postgres:5432/aiops_platform
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    networks:
+      - aiops-network
+    volumes:
+      - ./config/ssl:/app/ssl:ro
+
+  # Monitoring Service
+  monitoring-service:
+    build:
+      context: ./services/monitoring-service
+      dockerfile: Dockerfile
+    container_name: aiops-monitoring-service
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - KAFKA_BROKERS=kafka:29092
+      - PROMETHEUS_URL=http://prometheus:9090
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - DATABASE_URL=postgresql://aiops_user:aiops_password@postgres:5432/aiops_platform
+    depends_on:
+      - kafka
+      - prometheus
+      - elasticsearch
+    networks:
+      - aiops-network
+
+  # Prediction Service (AI/ML)
+  prediction-service:
+    build:
+      context: ./services/prediction-service
+      dockerfile: Dockerfile
+    container_name: aiops-prediction-service
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DATABASE_URL=postgresql://aiops_user:aiops_password@postgres:5432/aiops_platform
+      - KAFKA_BROKERS=kafka:29092
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - mlflow
+      - kafka
+    networks:
+      - aiops-network
+    volumes:
+      - ./ai-ml/models:/app/models
+
+  # Remediation Service
+  remediation-service:
+    build:
+      context: ./services/remediation-service
+      dockerfile: Dockerfile
+    container_name: aiops-remediation-service
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - KAFKA_BROKERS=kafka:29092
+      - DATABASE_URL=postgresql://aiops_user:aiops_password@postgres:5432/aiops_platform
+      - ANSIBLE_VAULT_PASSWORD=${ANSIBLE_VAULT_PASSWORD}
+    depends_on:
+      - kafka
+    networks:
+      - aiops-network
+    volumes:
+      - ./infrastructure/ansible:/app/playbooks
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Incident Service
+  incident-service:
+    build:
+      context: ./services/incident-service
+      dockerfile: Dockerfile
+    container_name: aiops-incident-service
+    ports:
+      - "8084:8084"
+    environment:
+      - PORT=8084
+      - DATABASE_URL=postgresql://aiops_user:aiops_password@postgres:5432/incidents
+      - KAFKA_BROKERS=kafka:29092
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - postgres
+      - kafka
+      - elasticsearch
+    networks:
+      - aiops-network
+
+  # Compliance Service
+  compliance-service:
+    build:
+      context: ./services/compliance-service
+      dockerfile: Dockerfile
+    container_name: aiops-compliance-service
+    ports:
+      - "8085:8085"
+    environment:
+      - PORT=8085
+      - DATABASE_URL=postgresql://aiops_user:aiops_password@postgres:5432/compliance
+      - KAFKA_BROKERS=kafka:29092
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - aiops-network
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    container_name: aiops-notification-service
+    ports:
+      - "8086:8086"
+    environment:
+      - PORT=8086
+      - KAFKA_BROKERS=kafka:29092
+      - REDIS_URL=redis://redis:6379
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - PAGERDUTY_INTEGRATION_KEY=${PAGERDUTY_INTEGRATION_KEY}
+    depends_on:
+      - kafka
+      - redis
+    networks:
+      - aiops-network
+
+  # =============================================================================
+  # WEB DASHBOARD
+  # =============================================================================
+
+  # Frontend Dashboard
+  web-dashboard:
+    build:
+      context: ./web-dashboard/frontend
+      dockerfile: Dockerfile
+    container_name: aiops-web-dashboard
+    ports:
+      - "3001:3001"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+      - REACT_APP_GRAFANA_URL=http://localhost:3000
+      - REACT_APP_PROMETHEUS_URL=http://localhost:9090
+    depends_on:
+      - api-gateway
+    networks:
+      - aiops-network
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  postgres_data:
+  redis_data:
+  clickhouse_data:
+  elasticsearch_data:
+  prometheus_data:
+  grafana_data:
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  aiops-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 
