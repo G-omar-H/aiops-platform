@@ -1,75 +1,105 @@
-# Core Framework
+# Core web framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-uvloop==0.19.0
+pydantic==2.5.0
 
-# Database & ORM
-asyncpg==0.29.0
-sqlalchemy[asyncio]==2.0.23
-alembic==1.12.1
-
-# Machine Learning & AI
+# Machine Learning and Data Science
+numpy==1.24.3
+pandas==2.0.3
+scikit-learn==1.3.2
 tensorflow==2.15.0
 torch==2.1.0
 torchvision==0.16.0
-scikit-learn==1.3.2
-numpy==1.24.3
-pandas==2.1.4
-joblib==1.3.2
-
-# Time Series & Forecasting
-statsmodels==0.14.0
+transformers==4.35.2
+xgboost==2.0.2
 prophet==1.1.4
-tslearn==0.6.2
 
-# Data Processing
-scipy==1.11.4
-matplotlib==3.8.2
-seaborn==0.13.0
+# Time series and anomaly detection
+pyod==1.1.3
+isolation-forest==0.1.0
+statsmodels==0.14.0
 
-# Async & Background Tasks
-celery==5.3.4
+# Database and caching
+sqlalchemy==2.0.23
+asyncpg==0.29.0
 redis==5.0.1
-aioredis==2.0.1
+influxdb-client==1.38.0
 
-# Monitoring & Observability
+# Monitoring and observability
 prometheus-client==0.19.0
-opentelemetry-api==1.21.0
-opentelemetry-sdk==1.21.0
-opentelemetry-instrumentation-fastapi==0.42b0
-
-# HTTP & API
-httpx==0.25.2
-pydantic==2.5.0
-pydantic-settings==2.1.0
-
-# Validation & Serialization
-marshmallow==3.20.1
-marshmallow-dataclass==8.6.0
-
-# Utilities
-python-multipart==0.0.6
-python-json-logger==2.0.7
 structlog==23.2.0
-click==8.1.7
+jaeger-client==4.8.0
 
-# Security
+# Security and authentication
+pyjwt==2.8.0
 cryptography==41.0.8
 passlib[bcrypt]==1.7.4
-python-jose[cryptography]==3.3.0
 
-# Configuration
+# HTTP and API utilities
+httpx==0.25.2
+aiohttp==3.9.1
+requests==2.31.0
+
+# Data processing and utilities
+python-multipart==0.0.6
 python-dotenv==1.0.0
 pyyaml==6.0.1
+toml==0.10.2
 
-# Testing (dev)
+# System monitoring
+psutil==5.9.6
+
+# Task queue and async processing
+celery==5.3.4
+aiofiles==23.2.1
+
+# Data validation and serialization
+marshmallow==3.20.1
+
+# Development and testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0
 httpx==0.25.2
+factory-boy==3.3.0
 
-# Linting & Formatting (dev)
+# Code quality
 black==23.11.0
 isort==5.12.0
 flake8==6.1.0
-mypy==1.7.1 
+mypy==1.7.1
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.4.8
+
+# Environment and configuration
+python-decouple==3.8
+
+# Date and time utilities
+python-dateutil==2.8.2
+
+# Image processing (for potential model visualization)
+pillow==10.1.0
+matplotlib==3.8.2
+
+# Network and service discovery
+dnspython==2.4.2
+
+# Compression and serialization
+msgpack==1.0.7
+orjson==3.9.10
+
+# Memory profiling and optimization
+memory-profiler==0.61.0
+py-spy==0.3.14
+
+# Feature engineering and preprocessing
+feature-engine==1.6.2
+
+# Model serving and MLOps
+mlflow==2.8.1
+joblib==1.3.2
+
+# GPU acceleration (optional, comment out if not using GPU)
+# nvidia-ml-py==12.535.108 
